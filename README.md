@@ -230,14 +230,16 @@ BEGIN;
     BEGIN
         -- 1. Перевіряємо наявність товарів на складі
         SELECT 
-            COALESCE(MIN(CASE WHEN id = 1 THEN left_in_stock END) >= 2, false) AND
-            COALESCE(MIN(CASE WHEN id = 2 THEN left_in_stock END) >= 1, false)
+        (SELECT COUNT(*) > 0 AND MIN(left_in_stock) >= 2 
         FROM products.items 
-        WHERE id IN (1, 2)
-        INTO STRICT is_enough_stock;
+        WHERE id = 1) AND
+        (SELECT COUNT(*) > 0 AND MIN(left_in_stock) >= 1 
+        FROM products.items 
+        WHERE id = 2)
+        INTO is_enough_stock;
 
         IF NOT is_enough_stock THEN
-            RAISE EXCEPTION 'Insufficient stock for items';
+            RAISE EXCEPTION 'Insufficient stock for items or item does not exist';
         END IF;
 
         -- 2. Створюємо нове замовлення та додаємо товари
@@ -298,3 +300,55 @@ BEGIN;
 
     END $$;
 COMMIT;
+
+--Seeds
+INSERT INTO "auth"."users" (username, email, password, created_at, updated_at)
+SELECT 
+    'user-' || id,
+    'user-' || id || '@example.com',
+    'securepassword',
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
+FROM 
+    generate_series(1, 100) AS s(id);  
+
+
+-- INSERT INTO "products"."items" (title, description, price, left_in_stock, created_at, updated_at)
+-- SELECT 
+--     'Product ' || id,  
+--     'Description for product ' || id,
+--     ROUND((RANDOM() * 100)::numeric, 2),
+--     FLOOR(RANDOM() * 1000)::INTEGER,
+--     CURRENT_TIMESTAMP,
+--     CURRENT_TIMESTAMP
+-- FROM 
+--     generate_series(1, 10000) AS s(id);
+
+DO $$
+DECLARE
+    category_id INTEGER;
+BEGIN
+    -- Step 1: Create a new category
+    INSERT INTO "products"."categories" (name)
+    VALUES ('food')
+    RETURNING id INTO category_id;
+
+    INSERT INTO "products"."items" (title, description, price, left_in_stock, created_at, updated_at)
+    SELECT 
+        'Product ' || id,  
+        'Description for product ' || id,
+        ROUND((RANDOM() * 100)::numeric, 2),
+        FLOOR(RANDOM() * 1000)::INTEGER,
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+    FROM 
+        generate_series(1, 10000) AS s(id);
+
+    INSERT INTO "products"."item_categories" (item_id, category_id)
+    SELECT 
+        id, category_id 
+    FROM 
+        "products"."items";
+    RAISE NOTICE 'Linked products to category ID: %', category_id;  
+
+END $$;
