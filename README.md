@@ -420,7 +420,7 @@ BEGIN
     RAISE NOTICE 'Linked products to category ID: %', category_id;  
 
 END $$;
-~~~sql
+```
 
 
 --Складнощі, що можуть виникнути з масштабуванням такої бази, і як їх можна вирішити:
