@@ -131,9 +131,9 @@ CREATE INDEX "idx_favorites_date" ON "auth"."user_favorites" ("created_at");
 -- Used for: SELECT ... FROM orders WHERE user_id = ? ORDER BY created_at;
 CREATE INDEX "idx_orders_user_history" ON "orders"."orders" ("user_id", "created_at");
 
--- Для швидкого пошуку замовлень за статусом та датою створення
--- Used for: SELECT ... FROM orders WHERE status = ? ORDER BY created_at;
--- CREATE INDEX "idx_orders_status" ON "orders"."orders" ("status", "created_at");
+-- Для швидкого пошуку замовлень за статусом та датою
+-- Used in check_and_update_order_status procedure
+CREATE INDEX "idx_status_history_lookup" ON "orders"."status_history" ("status", "changed_at");
 
 -- Для запитів на історію фінансових транзакцій замовлення
 -- Used for: SELECT ... FROM transactions WHERE order_id = ? ORDER BY transaction_date;
@@ -215,3 +215,86 @@ BEGIN
     END LOOP;
 END;
 $$ LANGUAGE plpgsql;
+
+
+-- SQL-запит з використанням транзакції для сценарію: створення нового замовлення з внесенням платежу
+BEGIN;
+    DO $$ 
+    DECLARE
+        new_order_id INTEGER;
+        initial_status_id INTEGER;
+        paid_status_id INTEGER;
+        total_amount DECIMAL(10,2);
+
+        is_enough_stock BOOLEAN;
+    BEGIN
+        -- 1. Перевіряємо наявність товарів на складі
+        SELECT 
+            COALESCE(MIN(CASE WHEN id = 1 THEN left_in_stock END) >= 2, false) AND
+            COALESCE(MIN(CASE WHEN id = 2 THEN left_in_stock END) >= 1, false)
+        FROM products.items 
+        WHERE id IN (1, 2)
+        INTO STRICT is_enough_stock;
+
+        IF NOT is_enough_stock THEN
+            RAISE EXCEPTION 'Insufficient stock for items';
+        END IF;
+
+        -- 2. Створюємо нове замовлення та додаємо товари
+        INSERT INTO orders.orders (user_id)
+        VALUES (1)  
+        RETURNING id INTO new_order_id;
+
+        UPDATE products.items 
+        SET left_in_stock = left_in_stock - 2
+        WHERE id = 1;
+
+        INSERT INTO orders.order_items (order_id, item_id, quantity)
+        VALUES (new_order_id, 1, 2);
+
+        UPDATE products.items 
+        SET left_in_stock = left_in_stock - 1
+        WHERE id = 2;
+
+        INSERT INTO orders.order_items (order_id, item_id, quantity)
+        VALUES (new_order_id, 2, 1);
+
+        -- 3. Створюємо початковий статус 'preparing'
+        INSERT INTO orders.status_history (order_id, status)
+        VALUES (new_order_id, 'preparing')
+        RETURNING id INTO initial_status_id;
+
+        -- 4. Оновлюємо замовлення з початковим статусом
+        UPDATE orders.orders 
+        SET status = initial_status_id
+        WHERE id = new_order_id;
+
+        -- 5. Рахуємо загальну суму замовлення
+        SELECT SUM(i.price * oi.quantity) INTO total_amount
+        FROM orders.order_items oi
+        JOIN products.items i ON oi.item_id = i.id
+        WHERE oi.order_id = new_order_id;
+
+        -- 6. Додаємо статус 'paid'
+        INSERT INTO orders.status_history (order_id, status)
+        VALUES (new_order_id, 'paid')
+        RETURNING id INTO paid_status_id;
+
+        -- 7. Оновлюємо статус замовлення на 'paid'
+        UPDATE orders.orders 
+        SET status = paid_status_id
+        WHERE id = new_order_id;
+
+        -- 8. Створюємо транзакцію оплати
+        INSERT INTO orders.transactions (
+            order_id,
+            transaction_type,
+            amount
+        ) VALUES (
+            new_order_id,
+            'payment',
+            total_amount
+        );
+
+    END $$;
+COMMIT;
