@@ -1,3 +1,71 @@
+Діаграма - https://dbdiagram.io/d/E-commerce-Diagram-676480e46ae6af4766bf8da6
+
+## Бізнес процеси та загальна логіка
+
+### Структура даних
+База даних розділена на 3 основні схеми:
+
+1. **auth**
+  - Керування користувачами (реєстрація, автентифікація)
+  - Збереження обраних товарів користувачів
+
+2. **products** 
+  - Управління товарами
+  - Підтримка множинних категорій та знижок для товарів
+  - Зберігання зображень товарів
+
+3. **orders**
+  - Обробка замовлень
+  - Відстеження статусів
+  - Управління транзакціями
+
+### Основні бізнес-процеси
+
+#### 1. Робота з товарами
+- Товар може належати до кількох категорій
+- Може мати декілька зображень
+- Підтримує систему знижок
+- Відслідковується залишок на складі
+
+#### 2. Процес замовлення
+1. **Створення замовлення**:
+  - Перевірка наявності товарів
+  - Створення запису в orders
+  - Додавання товарів до order_items
+  - Оновлення залишків на складі
+  - Встановлення початкового статусу 'preparing'
+
+2. **Життєвий цикл замовлення**:
+preparing -> paid -> sent -> delivered
+та canceled окремо
+- Кожна зміна статусу фіксується в status_history
+- Автоматичне скасування неоплачених замовлень через 3 дні
+
+3. **Фінансові операції**:
+- Оплата замовлення (payment)
+- Повернення коштів (refund)
+- Додаткові послуги (additional_service)
+
+#### 3. Система обраного
+- Користувачі можуть додавати товари до списку обраного
+- Один товар може бути в списку обраного у різних користувачів
+
+### Обмеження та валідації
+1. **Товари**:
+- Ціна завжди більше 0
+- Кількість на складі не може бути від'ємною
+- Знижка в межах 0-100%
+
+2. **Замовлення**:
+- Кількість товарів більше 0
+- Статуси змінюються в певній послідовності
+- Зберігається повна історія змін статусів
+
+3. **Користувачі**:
+- Унікальні email адреси
+- Валідація формату email
+
+
 ~~~sql
 CREATE SCHEMA "auth";
 CREATE SCHEMA "products";
@@ -110,6 +178,14 @@ CREATE TABLE "orders"."order_items" (
    "item_id" integer NOT NULL,
    "quantity" integer NOT NULL DEFAULT 1 CHECK ("quantity" > 0)
 );
+
+-- Для пошуку замовлень за статусом, в т.ч. для процедури сheck_and_update_order_status()
+-- Used for: SELECT ... FROM status_history WHERE status = 'preparing';
+CREATE INDEX "idx_order_history_status" ON "orders"."status_history" ("status");
+
+-- Для пошуку замовлень за датою зміни статусу в т.ч. для процедури сheck_and_update_order_status()
+-- Used for: SELECT ... FROM status_history WHERE changed_at < some_date
+CREATE INDEX "idx_order_changed_at" ON "orders"."status_history" ("changed_at");
 
 -- Для пошуку товарів за назвою та залишками на складі
 -- Used for: SELECT ... FROM items WHERE title LIKE ? AND left_in_stock > 0;
@@ -301,7 +377,8 @@ BEGIN;
     END $$;
 COMMIT;
 
---Seeds
+--Seeds generation:
+--Users
 INSERT INTO "auth"."users" (username, email, password, created_at, updated_at)
 SELECT 
     'user-' || id,
@@ -312,18 +389,9 @@ SELECT
 FROM 
     generate_series(1, 100) AS s(id);  
 
-
--- INSERT INTO "products"."items" (title, description, price, left_in_stock, created_at, updated_at)
--- SELECT 
---     'Product ' || id,  
---     'Description for product ' || id,
---     ROUND((RANDOM() * 100)::numeric, 2),
---     FLOOR(RANDOM() * 1000)::INTEGER,
---     CURRENT_TIMESTAMP,
---     CURRENT_TIMESTAMP
--- FROM 
---     generate_series(1, 10000) AS s(id);
-
+--Items
+-- додаємо категорію та генеруємо товари, що до неї належать,
+-- *Припускаємо, що категорія товару - обовʼязкова, зображення і знижка - не обовʼязкові
 DO $$
 DECLARE
     category_id INTEGER;
@@ -352,3 +420,12 @@ BEGIN
     RAISE NOTICE 'Linked products to category ID: %', category_id;  
 
 END $$;
+
+
+
+--РІЗНИЦЯ EXPLAIN та EXPLAIN ANALYZE:
+Обидві команди - EXPLAIN та EXPLAIN ANALYZE - використовуються для аналізу виконання запитів. 
+Але EXPLAIN показує план виконання запиту без його запуску.
+Це дозволяє оцінити ефективність запиту заздалегідь.
+EXPLAIN ANALYZE виконує запит і показує реальні результати: 
+час виконання, використані ресурси та інші метрики.
