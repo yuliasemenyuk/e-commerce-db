@@ -179,6 +179,8 @@ CREATE TABLE "orders"."order_items" (
    "quantity" integer NOT NULL DEFAULT 1 CHECK ("quantity" > 0)
 );
 
+--ІНДЕКСИ:
+
 -- Для пошуку замовлень за статусом, в т.ч. для процедури сheck_and_update_order_status()
 -- Used for: SELECT ... FROM status_history WHERE status = 'preparing';
 CREATE INDEX "idx_order_history_status" ON "orders"."status_history" ("status");
@@ -420,10 +422,10 @@ BEGIN
     RAISE NOTICE 'Linked products to category ID: %', category_id;  
 
 END $$;
-```
+~~~
 
 
---Складнощі, що можуть виникнути з масштабуванням такої бази, і як їх можна вирішити:
+## Складнощі, що можуть виникнути з масштабуванням такої бази, і як їх можна вирішити:
 
 ## 1. Проблема зʼєднання даних:
 Коли розділяємо базу на декілька серверів, замовлення можуть бути на одному 
@@ -454,7 +456,7 @@ END $$;
  і використовувати часові мітки, щоб знати, яка версія новіша.
 
 
---РІЗНИЦЯ EXPLAIN та EXPLAIN ANALYZE:
+## РІЗНИЦЯ EXPLAIN та EXPLAIN ANALYZE:
 Обидві команди - EXPLAIN та EXPLAIN ANALYZE - використовуються для аналізу виконання запитів. 
 Але EXPLAIN показує план виконання запиту без його запуску.
 Це дозволяє оцінити ефективність запиту заздалегідь.
